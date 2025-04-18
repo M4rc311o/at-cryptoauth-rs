@@ -580,16 +580,24 @@ impl<'a> Sha<'a> {
     #[allow(dead_code)]
     const MODE_SHA256_PUBLIC: u8 = 0x03;
 
+    const MODE_HMAC_START: u8 = 0x04;
+
     pub(crate) fn new(builder: PacketBuilder<'a>) -> Self {
         Self(builder)
     }
 
-    pub(crate) fn start(&mut self) -> Result<Packet, Error> {
-        let packet = self
-            .0
-            .opcode(OpCode::Sha)
-            .mode(Self::MODE_SHA256_START)
-            .build()?;
+    pub(crate) fn start(&mut self, key_id: Option<Slot>) -> Result<Packet, Error> {
+        let mode = if key_id.is_none() {
+            Self::MODE_SHA256_START
+        } else {
+            Self::MODE_HMAC_START
+        };
+
+        let packet = self.0.opcode(OpCode::Sha).mode(mode);
+        if let Some(key_id) = key_id {
+            packet.param2(key_id as u16);
+        }
+        let packet = packet.build()?;
         Ok(packet)
     }
 
@@ -853,7 +861,7 @@ mod tests {
     fn sha() {
         let buf = &mut [0x00u8; 0xff];
         let packet = Sha::new(PacketBuilder::new(buf.as_mut()))
-            .start()
+            .start(None)
             .unwrap()
             .buffer(buf.as_ref());
         assert_eq!(packet[0x01], 0x07);

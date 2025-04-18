@@ -35,7 +35,7 @@ where
             .0
             .borrow_mut()
             .atca
-            .sha()
+            .sha(None)
             .digest(msg)
             .map_err(|_| signature::Error::new())?;
         let key_id = self.0.borrow_mut().key_id.clone();
@@ -70,7 +70,7 @@ where
             .0
             .borrow_mut()
             .atca
-            .sha()
+            .sha(None)
             .digest(msg)
             .map_err(|_| signature::Error::new())?;
         self.0
@@ -114,11 +114,12 @@ impl<PHY, D> AtCaClient<PHY, D> {
         Aes { atca: self, key_id }
     }
 
-    pub fn sha(&mut self) -> Sha<'_, PHY, D> {
+    pub fn sha(&mut self, key_id: Option<Slot>) -> Sha<'_, PHY, D> {
         let remaining_bytes = Vec::new();
         Sha {
             atca: self,
             remaining_bytes,
+            key_id,
         }
     }
 
@@ -272,6 +273,18 @@ where
     pub fn write_aes_key(&mut self, key_id: Slot, aes_key: impl AsRef<[u8]>) -> Result<(), Error> {
         let mut data = Block::default();
         data.as_mut()[..0x10].copy_from_slice(aes_key.as_ref());
+        let packet =
+            command::Write::new(self.atca.packet_builder()).slot(key_id, 0 as u8, &data)?;
+        self.atca.execute(packet).map(drop)
+    }
+
+    pub fn write_hmac_key(
+        &mut self,
+        key_id: Slot,
+        hmac_key: impl AsRef<[u8]>,
+    ) -> Result<(), Error> {
+        let mut data = Block::default();
+        data.as_mut()[..0x20].copy_from_slice(hmac_key.as_ref());
         let packet =
             command::Write::new(self.atca.packet_builder()).slot(key_id, 0 as u8, &data)?;
         self.atca.execute(packet).map(drop)
@@ -465,6 +478,7 @@ where
 pub struct Sha<'a, PHY, D> {
     atca: &'a mut AtCaClient<PHY, D>,
     remaining_bytes: Vec<u8, 64>,
+    key_id: Option<Slot>,
 }
 
 impl<'a, PHY, D> Sha<'a, PHY, D>
@@ -473,7 +487,7 @@ where
     D: DelayNs,
 {
     pub fn init(&mut self) -> Result<(), Error> {
-        let packet = command::Sha::new(self.atca.packet_builder()).start()?;
+        let packet = command::Sha::new(self.atca.packet_builder()).start(self.key_id)?;
         self.atca.execute(packet).map(drop)
     }
 
